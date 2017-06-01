@@ -18,6 +18,16 @@ class UpdaterJS(ipywidgets.HTML): # a widget that has a JavaScript as its conten
     value = Unicode("").tag(sync=True)
 
 class JupyterNotebookPlotlyStream:
+
+    config_default = dict(
+        show_link=False,
+        link_text='Export to plot.ly',
+        validate=True,
+        default_width=800,
+        default_height=600,
+        global_requirejs=True,
+    )
+
     def __init__(self):
         initialized = getattr(py.offline, '__PLOTLY_OFFLINE_INITIALIZED') # due to name mangling...
         if not initialized:
@@ -27,19 +37,51 @@ class JupyterNotebookPlotlyStream:
                 '    import plotly',
                 '    plotly.offline.init_notebook_mode()']))
         self._fig = None
+        self._opt_html_table_side = None
         self._div_id = None
         self._already_plotted = False
+        self.config = self.config_default.copy()
+
+    def _plot_html(self):
+        return py.offline._plot_html(self._fig, **self.config)
 
     def setToPlotInNewCell(self):
         """reset the flags for plotting in a new notebook cell
-        
+
         Note that the contents of logs are not reset(!)
         """
         self._already_plotted = False
         self._div_id = None
-        
-    def firstRun(self):
-        assert self._fig is not None
+
+    @staticmethod
+    def _build_table(left, right, header=''):
+        width = '100%'
+        if header: # could be extended to 2 entries per column
+            #header = "<th>{}</th><th>{}</th>".format(header[0], header[1])
+            header = "<thead>{}</thead>".format(header)
+        html = ['<center>',
+                "<table style='width:{}'><tr>".format(width),
+                header,
+                "</tr><tbody><tr><td>",
+                left,
+                "</td><td>",
+                right,
+                "</td></tr></tbody></table>",
+                '</center>']
+        return ''.join(html)
+
+
+    def firstRun(self,
+                 fig=None,
+                 opt_html_table_side=None,
+                 table_header='',
+                 table_fig_side='L'):
+        if fig is None:
+            assert self._fig is not None
+        else:
+            self._fig = fig
+        if table_header is not None:
+            self._opt_html_table_side = opt_html_table_side
 
         ## Register interactive JS functions
         # This code is short so being registered multiple times does not hurt
@@ -55,7 +97,7 @@ class JupyterNotebookPlotlyStream:
                     'update: function(){'
                         'var container = this.pagetitle;'
                         'container.removeChild(container.childNodes[0]);'
-                        
+
                         'var child = document.createElement("script");'
                         'child.setAttribute("type", "text/javascript");'
                         'child.textContent = this.model.get("value");'
@@ -72,14 +114,18 @@ class JupyterNotebookPlotlyStream:
         IPython.display.display(self._widget_JS)
 
         ## iplot alternative
-        config = {'showLink':True, 'linkText':'Export to plot.ly'}
-        validate = True
-        plot_html, plotdivid, width, height = py.offline._plot_html(
-            self._fig, config, validate, '100%', 525, True # default settings of plotly.offline.iplot
-        )
+        plot_html, plotdivid, _, _ = self._plot_html()
 
         ## Update
+        if self._opt_html_table_side is not None:
+            if table_fig_side == 'L':
+                left, right = plot_html, self._opt_html_table_side
+            else:
+                right, left = plot_html, self._opt_html_table_side
+            plot_html = self._build_table(left, right, table_header)
+
         IPython.display.display(IPython.display.HTML(plot_html))
+
         self._div_id = str(plotdivid)
         self._already_plotted = True
 
@@ -89,12 +135,8 @@ class JupyterNotebookPlotlyStream:
         assert self._already_plotted == True
 
         ## iplot alternative
-        config = {'showLink':True, 'linkText':'Export to plot.ly'}
-        validate = True
-        plot_html, plotdivid, width, height = py.offline._plot_html(
-            self._fig, config, validate, '100%', 525, True # default settings of plotly.offline.iplot
-        )
-        
+        plot_html, plotdivid, _, _ = self._plot_html()
+
         ## Process the html text to obtain JS
         # assuming n_parse_char contains all the headers that I want to get rid of
         # The reason to use n_parse_char is that plot_html can be extremely long
@@ -106,4 +148,3 @@ class JupyterNotebookPlotlyStream:
 
         ## Update
         self._widget_JS.value = plot_js
-
