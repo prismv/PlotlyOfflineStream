@@ -60,28 +60,43 @@ class JupyterNotebookPlotlyStream:
             #header = "<th>{}</th><th>{}</th>".format(header[0], header[1])
             header = "<thead>{}</thead>".format(header)
         html = ['<center>',
-                "<table style='width:{}'><tr>".format(width),
+                '<table style="width:{}"><tr>'.format(width),
                 header,
                 "</tr><tbody><tr><td>",
+                '<div id="plotlyStreamTableLeft">',
                 left,
+                "</div>",
                 "</td><td>",
+                '<div id="plotlyStreamTableRight">',
                 right,
+                "</div>",
                 "</td></tr></tbody></table>",
                 '</center>']
         return ''.join(html)
 
-
     def firstRun(self,
                  fig=None,
-                 opt_html_table_side=None,
+                 other_content=None,
                  table_header='',
-                 table_fig_side='L'):
+                 table_fig_side='L',
+                 html_join=None,
+                 show=False):
+        if html_join is None:
+            self.html_join = lambda html: html
+        else:
+            self.html_join = html_join
         if fig is None:
             assert self._fig is not None
         else:
             self._fig = fig
-        if table_header is not None:
-            self._opt_html_table_side = opt_html_table_side
+        self._other_content = other_content
+        self._other_header = table_header
+        if self._other_content:
+            self._other_side = 'R' if table_fig_side == 'L' else 'L'
+            self._fig_side = table_fig_side
+        else:
+            self._fig_side = None
+            self._other_side = None
 
         ## Register interactive JS functions
         # This code is short so being registered multiple times does not hurt
@@ -107,27 +122,49 @@ class JupyterNotebookPlotlyStream:
                 'return {HelloView: HelloView}'
             '})'
         )
-        IPython.display.display(obj)
 
-        ## Display the widget 
-        self._widget_JS = UpdaterJS()
-        IPython.display.display(self._widget_JS)
+        self._obj = obj
+        self._handle_obj = None
+        self._handle_html = None
+        self._widget_JS = None
+        self._handle_js = None
 
         ## iplot alternative
         plot_html, plotdivid, _, _ = self._plot_html()
 
         ## Update
-        if self._opt_html_table_side is not None:
-            if table_fig_side == 'L':
-                left, right = plot_html, self._opt_html_table_side
+        if self._other_content is not None:
+            if self._fig_side == 'L':
+                left, right = plot_html, self._other_content
             else:
-                right, left = plot_html, self._opt_html_table_side
+                right, left = plot_html, self._other_content
             plot_html = self._build_table(left, right, table_header)
 
-        IPython.display.display(IPython.display.HTML(plot_html))
+        self._html = html_join(plot_html)
+        self._html_obj = None
+        if show:
+            self.show()
 
         self._div_id = str(plotdivid)
         self._already_plotted = True
+
+    def show(self):
+        IPython.display.clear_output()
+        #if self._widget_JS is None:
+        self._widget_JS = UpdaterJS()
+        self._handle_obj = IPython.display.display(self._obj)
+        #plot_html, plotdivid, _, _ = self._plot_html()
+        #self._html = plot_html
+        if self._html:
+            ## Display the widget
+            if True: # self._handle_html is None:
+                #self._handle_js = IPython.display.display(self._widget_JS, display_id='plotlyStream_js')
+                self._handle_html = IPython.display.display(self._widget_JS,
+                                                            IPython.display.HTML(self._html),
+                                                            display_id='plotlyStream_html')
+            else:
+                self._handle_html.update(IPython.display.HTML(self._widget_JS, self._html))
+                #self._handle_js.update(self._widget_JS)
 
     def update(self, n_parse_char=1024):
         assert self._fig is not None
@@ -135,7 +172,9 @@ class JupyterNotebookPlotlyStream:
         assert self._already_plotted == True
 
         ## iplot alternative
-        plot_html, plotdivid, _, _ = self._plot_html()
+        _plot_html, plotdivid, _, _ = self._plot_html()
+        #self._html = plot_html = self.html_join(_plot_html)
+        plot_html = _plot_html
 
         ## Process the html text to obtain JS
         # assuming n_parse_char contains all the headers that I want to get rid of
