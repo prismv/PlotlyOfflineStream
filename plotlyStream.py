@@ -41,6 +41,31 @@ class JupyterNotebookPlotlyStream:
         self._div_id = None
         self._already_plotted = False
         self.config = self.config_default.copy()
+        ## Register interactive JS functions
+        # This code is short so being registered multiple times does not hurt
+        obj = IPython.display.Javascript(
+            'require.undef("widget-dynamicJS-exec");'
+            'define("widget-dynamicJS-exec", ["jupyter-js-widgets"], function(widget){'
+                'var HelloView = widget.DOMWidgetView.extend({'
+                    'render: function(){'
+                        'this.pagetitle = document.createElement("div");'
+                        'this.pagetitle.appendChild(document.createElement("div"));' # dummy child, needed because update() removes a child
+                        'this.el.appendChild(this.pagetitle);'
+                    '},'
+                    'update: function(){'
+                        'var container = this.pagetitle;'
+                        'container.removeChild(container.childNodes[0]);'
+
+                        'var child = document.createElement("script");'
+                        'child.setAttribute("type", "text/javascript");'
+                        'child.textContent = this.model.get("value");'
+                        'container.appendChild(child);'
+                    '}'
+                '});'
+                'return {HelloView: HelloView}'
+            '})'
+        )
+        self._obj = obj
 
     def _plot_html(self):
         return py.offline._plot_html(self._fig, **self.config)
@@ -98,32 +123,6 @@ class JupyterNotebookPlotlyStream:
             self._fig_side = None
             self._other_side = None
 
-        ## Register interactive JS functions
-        # This code is short so being registered multiple times does not hurt
-        obj = IPython.display.Javascript(
-            'require.undef("widget-dynamicJS-exec");'
-            'define("widget-dynamicJS-exec", ["jupyter-js-widgets"], function(widget){'
-                'var HelloView = widget.DOMWidgetView.extend({'
-                    'render: function(){'
-                        'this.pagetitle = document.createElement("div");'
-                        'this.pagetitle.appendChild(document.createElement("div"));' # dummy child, needed because update() removes a child
-                        'this.el.appendChild(this.pagetitle);'
-                    '},'
-                    'update: function(){'
-                        'var container = this.pagetitle;'
-                        'container.removeChild(container.childNodes[0]);'
-
-                        'var child = document.createElement("script");'
-                        'child.setAttribute("type", "text/javascript");'
-                        'child.textContent = this.model.get("value");'
-                        'container.appendChild(child);'
-                    '}'
-                '});'
-                'return {HelloView: HelloView}'
-            '})'
-        )
-
-        self._obj = obj
         self._handle_obj = None
         self._handle_html = None
         self._widget_JS = None
@@ -157,20 +156,16 @@ class JupyterNotebookPlotlyStream:
         #self._html = plot_html
         if self._html:
             ## Display the widget
-            if True: # self._handle_html is None:
+            if True: #self._handle_html is None:
                 #self._handle_js = IPython.display.display(self._widget_JS, display_id='plotlyStream_js')
                 self._handle_html = IPython.display.display(self._widget_JS,
                                                             IPython.display.HTML(self._html),
                                                             display_id='plotlyStream_html')
             else:
-                self._handle_html.update(IPython.display.HTML(self._widget_JS, self._html))
+                self._handle_html.update(IPython.display.display(self._widget_JS, self._html))
                 #self._handle_js.update(self._widget_JS)
 
-    def update(self, n_parse_char=1024):
-        assert self._fig is not None
-        assert self._div_id is not None
-        assert self._already_plotted == True
-
+    def _update(self, n_parse_char):
         ## iplot alternative
         _plot_html, plotdivid, _, _ = self._plot_html()
         #self._html = plot_html = self.html_join(_plot_html)
@@ -183,7 +178,15 @@ class JupyterNotebookPlotlyStream:
         cut_head += plot_html[n_parse_char:]
         plot_js = cut_head[:-9] # get rid of ending 9 characters "</script>" at the end (without quotations)
         segs = plot_js[:n_parse_char].split(str(plotdivid))
-        plot_js = self._div_id.join(segs) + plot_js[n_parse_char:]
+        return plotdivid, self._div_id.join(segs) + plot_js[n_parse_char:]
+
+    def update(self, n_parse_char=1024):
+        assert self._fig is not None
+        assert self._div_id is not None
+        assert self._already_plotted == True
+
+        plotdivid, plot_js = self._update(n_parse_char)
 
         ## Update
         self._widget_JS.value = plot_js
+        #self._div_id = str(plotdivid)
